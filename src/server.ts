@@ -8,7 +8,8 @@ const PORT = Number(process.env.PORT ?? 3001);
 
 // Servidor HTTP minimo (health check para DigitalOcean) + socket.io encima.
 const httpServer = createServer((req, res) => {
-  if (req.url === '/health') {
+  // '/' y '/health' responden OK (health check de DigitalOcean).
+  if (req.url === '/' || req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
       JSON.stringify({
