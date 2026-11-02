@@ -1,0 +1,39 @@
+# Spec de DigitalOcean App Platform para el servicio realtime.
+# Se puede crear el App desde el panel (detecta el Dockerfile solo) o con:
+#   doctl apps create --spec .do/app.yaml
+# y actualizar con:
+#   doctl apps update <APP_ID> --spec .do/app.yaml
+#
+# OJO: DATABASE_URL va como SECRET y se carga en el panel (no se commitea la pass).
+
+name: audio-tours-realtime
+region: nyc
+services:
+  - name: realtime
+    github:
+      repo: funnelssavenstudio/audio-tours-realtime
+      branch: master
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    http_port: 3001
+    instance_count: 1
+    # Plan basico mas chico (~US$5/mes). Ajustable desde el panel.
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    health_check:
+      http_path: /health
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        type: SECRET
+        # Pegar en el panel la connection string de la base del cliente
+        # (db-postgresql-gours-app-...ondigitalocean.com:25060/defaultdb?sslmode=require).
+        value: "REEMPLAZAR_EN_EL_PANEL"
+      - key: RUST_API_URL
+        scope: RUN_TIME
+        value: https://app.audiotoursnewyork.com/api/v1
+      # Fallback a staging para que tambien validen los tokens de la app en debug
+      # (igual que el backend Vercel). Al salir 100% en vivo se puede quitar.
+      - key: RUST_API_URL_FALLBACK
+        scope: RUN_TIME
+        value: https://gours.shiftr.tech/api/v1
+      # NO setear DEV_SKIP_AUTH en produccion (solo para pruebas locales).

@@ -62,28 +62,40 @@ export async function validateSocketToken(
   const userId = payload ? getUserId(payload) : null;
   if (!userId) return null;
 
-  const base = process.env.RUST_API_URL;
-  if (!base) throw new Error('Falta la variable de entorno RUST_API_URL.');
-
-  try {
-    const res = await fetch(`${base}/user/${userId}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      user?: { uuid?: string; roles?: unknown };
-      uuid?: string;
-      roles?: unknown;
-    };
-    const user = data.user ?? data;
-    const uuid = (user.uuid as string) ?? userId;
-    return { uuid, roles: parseRoles(user.roles) };
-  } catch {
-    return null;
+  // Igual que el backend Vercel (lib/auth.ts): puede haber mas de un entorno
+  // Rust, produccion (RUST_API_URL) y staging (RUST_API_URL_FALLBACK). Se valida
+  // contra produccion primero y, si no valida, contra staging. Al salir en vivo
+  // se puede dejar solo produccion quitando el fallback.
+  const bases = [
+    process.env.RUST_API_URL,
+    process.env.RUST_API_URL_FALLBACK,
+  ].filter((b): b is string => typeof b === 'string' && b.length > 0);
+  if (bases.length === 0) {
+    throw new Error('Falta la variable de entorno RUST_API_URL.');
   }
+
+  for (const base of bases) {
+    try {
+      const res = await fetch(`${base}/user/${userId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      if (!res.ok) continue;
+      const data = (await res.json()) as {
+        user?: { uuid?: string; roles?: unknown };
+        uuid?: string;
+        roles?: unknown;
+      };
+      const user = data.user ?? data;
+      const uuid = (user.uuid as string) ?? userId;
+      return { uuid, roles: parseRoles(user.roles) };
+    } catch {
+      // Probar el siguiente entorno.
+    }
+  }
+  return null;
 }
 
 export function hasRole(user: SocketUser, role: string): boolean {
