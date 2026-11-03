@@ -3,6 +3,7 @@ import { Server } from 'socket.io';
 
 import { hasRole, validateSocketToken, type SocketUser } from './auth.js';
 import {
+  closeChatRoom,
   isEventMember,
   persistChatMessage,
   upsertTouristLocation,
@@ -138,6 +139,46 @@ io.on('connection', (socket) => {
       event_uuid: eventUuid,
       checkpoint_uuid: checkpointUuid,
     });
+  });
+
+  // Aviso del punto de encuentro: el guia manda una ubicacion (y una nota
+  // opcional) a los turistas del evento.
+  socket.on(
+    'meeting_point',
+    (payload: {
+      event_uuid?: string;
+      latitude?: number;
+      longitude?: number;
+      note?: string;
+    }) => {
+      if (!isGuide) return;
+      const eventUuid = payload?.event_uuid;
+      const { latitude, longitude } = payload ?? {};
+      if (!eventUuid || typeof latitude !== 'number' || typeof longitude !== 'number') return;
+      if (!socket.rooms.has(room(eventUuid))) return;
+      io.to(touristsRoom(eventUuid)).emit('meeting_point', {
+        event_uuid: eventUuid,
+        latitude,
+        longitude,
+        note: typeof payload.note === 'string' ? payload.note.slice(0, 500) : undefined,
+        at: new Date().toISOString(),
+      });
+    },
+  );
+
+  // Cerrar el chat al terminar el recorrido: el guia cierra la sala; no se
+  // aceptan mas mensajes (persistChatMessage devuelve null) y se avisa a todos.
+  socket.on('close_room', async (payload: { event_uuid?: string }) => {
+    if (!isGuide) return;
+    const eventUuid = payload?.event_uuid;
+    if (!eventUuid) return;
+    if (!socket.rooms.has(room(eventUuid))) return;
+    try {
+      await closeChatRoom(eventUuid);
+      io.to(room(eventUuid)).emit('room_closed', { event_uuid: eventUuid });
+    } catch (e) {
+      console.error('[close_room] error:', e);
+    }
   });
 });
 

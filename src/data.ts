@@ -83,6 +83,15 @@ export async function isEventMember(
   return rows.length > 0;
 }
 
+/** Cierra la sala de chat del evento (al terminar el recorrido). */
+export async function closeChatRoom(eventUuid: string): Promise<void> {
+  await query(
+    `UPDATE ext.chat_room SET status = 'closed', updated_at = now()
+     WHERE event_uuid = $1`,
+    [eventUuid],
+  );
+}
+
 /** Upsert de la ultima ubicacion del turista en el evento (sin historial). */
 export async function upsertTouristLocation(params: {
   eventUuid: string;
