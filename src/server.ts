@@ -2,7 +2,11 @@ import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 
 import { hasRole, validateSocketToken, type SocketUser } from './auth.js';
-import { persistChatMessage, upsertTouristLocation } from './data.js';
+import {
+  isEventMember,
+  persistChatMessage,
+  upsertTouristLocation,
+} from './data.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -45,11 +49,23 @@ io.on('connection', (socket) => {
 
   // Unirse a la sala del evento. Los guias entran ademas a la subsala de guias
   // (para recibir ubicaciones) y los turistas a la de turistas (para el push).
-  socket.on('join', (payload: { event_uuid?: string }) => {
+  socket.on('join', async (payload: { event_uuid?: string }) => {
     const eventUuid = payload?.event_uuid;
     if (!eventUuid) return;
-    void socket.join(room(eventUuid));
-    void socket.join(isGuide ? guidesRoom(eventUuid) : touristsRoom(eventUuid));
+    // Solo puede entrar quien pertenece al evento (guia asignado o turista con
+    // ticket/checkin). Asi nadie espia el chat ni la ubicacion de tours ajenos.
+    let allowed = false;
+    try {
+      allowed = await isEventMember(eventUuid, user.uuid, isGuide);
+    } catch (e) {
+      console.error('[join] error verificando pertenencia:', e);
+    }
+    if (!allowed) {
+      socket.emit('join_error', { event_uuid: eventUuid, reason: 'not_member' });
+      return;
+    }
+    await socket.join(room(eventUuid));
+    await socket.join(isGuide ? guidesRoom(eventUuid) : touristsRoom(eventUuid));
     socket.emit('joined', { event_uuid: eventUuid, role: isGuide ? 'tour_guide' : 'tourist' });
   });
 
@@ -62,6 +78,8 @@ io.on('connection', (socket) => {
       const eventUuid = payload?.event_uuid;
       const text = payload?.text?.trim();
       if (!eventUuid || !text) return;
+      // Solo si se unio a la sala (paso el gate de pertenencia en 'join').
+      if (!socket.rooms.has(room(eventUuid))) return;
       try {
         const msg = await persistChatMessage({
           eventUuid,
@@ -90,6 +108,8 @@ io.on('connection', (socket) => {
       const eventUuid = payload?.event_uuid;
       const { latitude, longitude } = payload ?? {};
       if (!eventUuid || typeof latitude !== 'number' || typeof longitude !== 'number') return;
+      // Solo si se unio a la sala (paso el gate de pertenencia en 'join').
+      if (!socket.rooms.has(room(eventUuid))) return;
       try {
         await upsertTouristLocation({ eventUuid, userUuid: user.uuid, latitude, longitude });
         io.to(guidesRoom(eventUuid)).emit('tourist_location', {
@@ -112,6 +132,8 @@ io.on('connection', (socket) => {
     const eventUuid = payload?.event_uuid;
     const checkpointUuid = payload?.checkpoint_uuid;
     if (!eventUuid || !checkpointUuid) return;
+    // Solo el guia que se unio a este evento (paso el gate en 'join').
+    if (!socket.rooms.has(room(eventUuid))) return;
     io.to(touristsRoom(eventUuid)).emit('play_checkpoint_audio', {
       event_uuid: eventUuid,
       checkpoint_uuid: checkpointUuid,

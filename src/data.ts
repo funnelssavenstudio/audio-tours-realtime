@@ -50,6 +50,39 @@ export async function persistChatMessage(params: {
   return rows[0];
 }
 
+/**
+ * Verifica que el usuario pertenezca al evento antes de dejarlo entrar a la
+ * sala en vivo. Un guia pertenece si esta en public.event_tour_guides; un
+ * turista si tiene un ticket (public.tickets) o un checkin (public.event_checkins)
+ * para ese evento. Evita que cualquier usuario autenticado espie el chat o la
+ * ubicacion GPS de turistas de tours ajenos.
+ */
+export async function isEventMember(
+  eventUuid: string,
+  userUuid: string,
+  isGuide: boolean,
+): Promise<boolean> {
+  if (isGuide) {
+    const rows = await query(
+      `SELECT 1 FROM public.event_tour_guides
+        WHERE event_uuid = $1 AND tour_guide_uuid = $2
+        LIMIT 1`,
+      [eventUuid, userUuid],
+    );
+    return rows.length > 0;
+  }
+  const rows = await query(
+    `SELECT 1 FROM public.tickets
+       WHERE event_uuid = $1 AND tourist_uuid = $2
+     UNION ALL
+     SELECT 1 FROM public.event_checkins
+       WHERE event_uuid = $1 AND tourist_uuid = $2
+     LIMIT 1`,
+    [eventUuid, userUuid],
+  );
+  return rows.length > 0;
+}
+
 /** Upsert de la ultima ubicacion del turista en el evento (sin historial). */
 export async function upsertTouristLocation(params: {
   eventUuid: string;
