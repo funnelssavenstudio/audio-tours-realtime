@@ -116,6 +116,7 @@ io.on('connection', (socket) => {
         io.to(guidesRoom(eventUuid)).emit('tourist_location', {
           event_uuid: eventUuid,
           user_uuid: user.uuid,
+          name: user.name,
           latitude,
           longitude,
           updated_at: new Date().toISOString(),

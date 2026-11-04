@@ -1,6 +1,25 @@
 export interface SocketUser {
   uuid: string;
   roles: string[];
+  /** Nombre para mostrar (nombre + apellido, o email). Puede faltar. */
+  name?: string;
+}
+
+/** Arma el nombre para mostrar a partir del usuario del Rust. */
+function buildDisplayName(user: {
+  name?: unknown;
+  last_name?: unknown;
+  email?: unknown;
+}): string | undefined {
+  const parts = [user.name, user.last_name]
+    .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+    .map((p) => p.trim());
+  const full = parts.join(' ').trim();
+  if (full.length > 0) return full;
+  if (typeof user.email === 'string' && user.email.length > 0) {
+    return user.email;
+  }
+  return undefined;
 }
 
 /** Decodifica el payload de un JWT sin verificar la firma (solo para leer el id). */
@@ -84,13 +103,22 @@ export async function validateSocketToken(
       });
       if (!res.ok) continue;
       const data = (await res.json()) as {
-        user?: { uuid?: string; roles?: unknown };
+        user?: {
+          uuid?: string;
+          roles?: unknown;
+          name?: unknown;
+          last_name?: unknown;
+          email?: unknown;
+        };
         uuid?: string;
         roles?: unknown;
+        name?: unknown;
+        last_name?: unknown;
+        email?: unknown;
       };
       const user = data.user ?? data;
       const uuid = (user.uuid as string) ?? userId;
-      return { uuid, roles: parseRoles(user.roles) };
+      return { uuid, roles: parseRoles(user.roles), name: buildDisplayName(user) };
     } catch {
       // Probar el siguiente entorno.
     }
