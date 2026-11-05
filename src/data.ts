@@ -92,6 +92,21 @@ export async function closeChatRoom(eventUuid: string): Promise<void> {
   );
 }
 
+/** Reabre la sala de chat del evento (al comenzar el recorrido). */
+export async function openChatRoom(eventUuid: string): Promise<void> {
+  await query(
+    `INSERT INTO ext.chat_room (event_uuid, status) VALUES ($1, 'open')
+     ON CONFLICT (event_uuid) DO UPDATE SET status = 'open', updated_at = now()`,
+    [eventUuid],
+  );
+}
+
+/** Estado de la sala de chat del evento ('open'/'closed'); la crea si no existe. */
+export async function getChatRoomStatus(eventUuid: string): Promise<string> {
+  const room = await ensureChatRoom(eventUuid);
+  return room.status;
+}
+
 /** Upsert de la ultima ubicacion del turista en el evento (sin historial). */
 export async function upsertTouristLocation(params: {
   eventUuid: string;

@@ -4,7 +4,9 @@ import { Server } from 'socket.io';
 import { hasRole, validateSocketToken, type SocketUser } from './auth.js';
 import {
   closeChatRoom,
+  getChatRoomStatus,
   isEventMember,
+  openChatRoom,
   persistChatMessage,
   upsertTouristLocation,
 } from './data.js';
@@ -67,7 +69,19 @@ io.on('connection', (socket) => {
     }
     await socket.join(room(eventUuid));
     await socket.join(isGuide ? guidesRoom(eventUuid) : touristsRoom(eventUuid));
-    socket.emit('joined', { event_uuid: eventUuid, role: isGuide ? 'tour_guide' : 'tourist' });
+    // Avisa si la sala de chat esta cerrada, asi el cliente deshabilita el envio
+    // desde el arranque (y no deja escribir mensajes que se perderian).
+    let chatClosed = false;
+    try {
+      chatClosed = (await getChatRoomStatus(eventUuid)) === 'closed';
+    } catch (e) {
+      console.error('[join] error leyendo estado de sala:', e);
+    }
+    socket.emit('joined', {
+      event_uuid: eventUuid,
+      role: isGuide ? 'tour_guide' : 'tourist',
+      chat_closed: chatClosed,
+    });
   });
 
   // Chat grupal: persiste el mensaje y lo reemite a toda la sala. La traduccion
@@ -179,6 +193,21 @@ io.on('connection', (socket) => {
       io.to(room(eventUuid)).emit('room_closed', { event_uuid: eventUuid });
     } catch (e) {
       console.error('[close_room] error:', e);
+    }
+  });
+
+  // Reabrir el chat al comenzar el recorrido: el guia reabre la sala y se avisa
+  // a todos para que vuelvan a habilitar el envio.
+  socket.on('open_room', async (payload: { event_uuid?: string }) => {
+    if (!isGuide) return;
+    const eventUuid = payload?.event_uuid;
+    if (!eventUuid) return;
+    if (!socket.rooms.has(room(eventUuid))) return;
+    try {
+      await openChatRoom(eventUuid);
+      io.to(room(eventUuid)).emit('room_opened', { event_uuid: eventUuid });
+    } catch (e) {
+      console.error('[open_room] error:', e);
     }
   });
 });
