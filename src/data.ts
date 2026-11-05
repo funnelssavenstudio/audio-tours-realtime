@@ -22,7 +22,22 @@ async function ensureChatRoom(
   return rows[0];
 }
 
-/** Persiste un mensaje de chat. Devuelve null si la sala esta cerrada. */
+/**
+ * El chat de un evento esta abierto mientras el tour esta "en curso" o
+ * "abierto" (no finalizado ni pendiente). Se deriva del ESTADO DEL EVENTO, que
+ * es la fuente de verdad confiable (el "Terminar tour" lo deja finalizado),
+ * asi no dependemos de una maniobra por socket que puede fallar.
+ */
+export async function eventChatIsOpen(eventUuid: string): Promise<boolean> {
+  const rows = await query<{ progress: string }>(
+    `SELECT progress::text AS progress FROM public.events WHERE uuid = $1`,
+    [eventUuid],
+  );
+  const progress = rows[0]?.progress;
+  return progress === 'open' || progress === 'in_progress';
+}
+
+/** Persiste un mensaje de chat. Devuelve null si el chat esta cerrado. */
 export async function persistChatMessage(params: {
   eventUuid: string;
   senderUserUuid: string;
@@ -30,8 +45,8 @@ export async function persistChatMessage(params: {
   text: string;
   languageCode: string;
 }): Promise<StoredChatMessage | null> {
+  if (!(await eventChatIsOpen(params.eventUuid))) return null;
   const room = await ensureChatRoom(params.eventUuid);
-  if (room.status === 'closed') return null;
 
   const rows = await query<StoredChatMessage>(
     `INSERT INTO ext.chat_message
@@ -101,10 +116,9 @@ export async function openChatRoom(eventUuid: string): Promise<void> {
   );
 }
 
-/** Estado de la sala de chat del evento ('open'/'closed'); la crea si no existe. */
+/** Estado del chat del evento ('open'/'closed'), derivado del estado del tour. */
 export async function getChatRoomStatus(eventUuid: string): Promise<string> {
-  const room = await ensureChatRoom(eventUuid);
-  return room.status;
+  return (await eventChatIsOpen(eventUuid)) ? 'open' : 'closed';
 }
 
 /** Upsert de la ultima ubicacion del turista en el evento (sin historial). */
