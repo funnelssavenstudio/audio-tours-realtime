@@ -66,6 +66,27 @@ export async function persistChatMessage(params: {
 }
 
 /**
+ * Guarda en cache las traducciones de un mensaje (mapa {idioma: texto}),
+ * salteando el idioma original. Idempotente (ON CONFLICT DO NOTHING).
+ */
+export async function storeChatTranslations(
+  messageUuid: string,
+  map: Record<string, string>,
+  originalLang: string,
+): Promise<void> {
+  const entries = Object.entries(map).filter(([lang]) => lang !== originalLang);
+  for (const [lang, txt] of entries) {
+    await query(
+      `INSERT INTO ext.chat_message_translation
+         (message_uuid, language_code, translated_text)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (message_uuid, language_code) DO NOTHING`,
+      [messageUuid, lang, txt],
+    );
+  }
+}
+
+/**
  * Verifica que el usuario pertenezca al evento antes de dejarlo entrar a la
  * sala en vivo. Un guia pertenece si esta en public.event_tour_guides; un
  * turista si tiene un ticket (public.tickets) o un checkin (public.event_checkins)

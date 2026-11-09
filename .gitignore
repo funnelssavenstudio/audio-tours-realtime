@@ -6,3 +6,5 @@ dist/
 
 # Test harness local (no va al repo)
 rt_tourist.mjs
+selftest_chat.mjs
+selftest_open.mjs

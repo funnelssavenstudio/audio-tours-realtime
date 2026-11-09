@@ -8,8 +8,10 @@ import {
   isEventMember,
   openChatRoom,
   persistChatMessage,
+  storeChatTranslations,
   upsertTouristLocation,
 } from './data.js';
+import { translateMessage } from './translate.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -107,7 +109,29 @@ io.on('connection', (socket) => {
           socket.emit('chat_error', { reason: 'room_closed' });
           return;
         }
-        io.to(room(eventUuid)).emit('chat_message', { ...msg, event_uuid: eventUuid });
+        // Traduce el mensaje a los idiomas destino, cachea y lo emite con el
+        // mapa { idioma: texto } para que cada turista lo vea en su idioma.
+        let translations: Record<string, string> = {
+          [msg.original_language_code]: msg.text,
+        };
+        try {
+          translations = await translateMessage(
+            msg.text,
+            msg.original_language_code,
+          );
+          await storeChatTranslations(
+            msg.uuid,
+            translations,
+            msg.original_language_code,
+          );
+        } catch (err) {
+          console.error('[chat_message] translate error:', err);
+        }
+        io.to(room(eventUuid)).emit('chat_message', {
+          ...msg,
+          event_uuid: eventUuid,
+          translations,
+        });
       } catch (e) {
         console.error('[chat_message] error:', e);
         socket.emit('chat_error', { reason: 'server_error' });
