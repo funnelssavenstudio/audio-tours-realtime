@@ -143,18 +143,33 @@ io.on('connection', (socket) => {
   // (no se expone entre turistas).
   socket.on(
     'location_update',
-    async (payload: { event_uuid?: string; latitude?: number; longitude?: number }) => {
+    async (payload: {
+      event_uuid?: string;
+      latitude?: number;
+      longitude?: number;
+      checkpoint_index?: number;
+      checkpoint_total?: number;
+    }) => {
       const eventUuid = payload?.event_uuid;
       const { latitude, longitude } = payload ?? {};
       if (!eventUuid || typeof latitude !== 'number' || typeof longitude !== 'number') return;
       // Solo si se unio a la sala (paso el gate de pertenencia en 'join').
       if (!socket.rooms.has(room(eventUuid))) return;
+      // Progreso del turista (punto actual / total), si la app lo mando.
+      const checkpointIndex =
+        typeof payload?.checkpoint_index === 'number' ? payload.checkpoint_index : undefined;
+      const checkpointTotal =
+        typeof payload?.checkpoint_total === 'number' ? payload.checkpoint_total : undefined;
       try {
         await upsertTouristLocation({ eventUuid, userUuid: user.uuid, latitude, longitude });
         io.to(guidesRoom(eventUuid)).emit('tourist_location', {
           event_uuid: eventUuid,
           user_uuid: user.uuid,
           name: user.name,
+          // UUID de la foto de perfil (el guia la baja del Rust con su token).
+          photo_uuid: user.avatar,
+          checkpoint_index: checkpointIndex,
+          checkpoint_total: checkpointTotal,
           latitude,
           longitude,
           updated_at: new Date().toISOString(),

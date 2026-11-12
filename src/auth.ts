@@ -3,6 +3,8 @@ export interface SocketUser {
   roles: string[];
   /** Nombre para mostrar (nombre + apellido, o email). Puede faltar. */
   name?: string;
+  /** UUID de la foto de perfil (media del Rust). Puede faltar. */
+  avatar?: string;
 }
 
 /** Arma el nombre para mostrar a partir del usuario del Rust. */
@@ -109,16 +111,23 @@ export async function validateSocketToken(
           name?: unknown;
           last_name?: unknown;
           email?: unknown;
+          avatar?: unknown;
         };
         uuid?: string;
         roles?: unknown;
         name?: unknown;
         last_name?: unknown;
         email?: unknown;
+        avatar?: unknown;
       };
       const user = data.user ?? data;
       const uuid = (user.uuid as string) ?? userId;
-      return { uuid, roles: parseRoles(user.roles), name: buildDisplayName(user) };
+      return {
+        uuid,
+        roles: parseRoles(user.roles),
+        name: buildDisplayName(user),
+        avatar: typeof user.avatar === 'string' ? user.avatar : undefined,
+      };
     } catch {
       // Probar el siguiente entorno.
     }
