@@ -4,6 +4,8 @@ import { Server } from 'socket.io';
 import { hasRole, validateSocketToken, type SocketUser } from './auth.js';
 import {
   closeChatRoom,
+  deleteChatMessage,
+  editChatMessage,
   getChatRoomStatus,
   isEventMember,
   openChatRoom,
@@ -135,6 +137,90 @@ io.on('connection', (socket) => {
       } catch (e) {
         console.error('[chat_message] error:', e);
         socket.emit('chat_error', { reason: 'server_error' });
+      }
+    },
+  );
+
+  // Editar un mensaje (solo el autor). Re-traduce y avisa a toda la sala con
+  // 'chat_message_edited' para que todos actualicen el texto en su idioma.
+  socket.on(
+    'edit_message',
+    async (payload: {
+      event_uuid?: string;
+      message_uuid?: string;
+      text?: string;
+      language_code?: string;
+    }) => {
+      const eventUuid = payload?.event_uuid;
+      const messageUuid = payload?.message_uuid;
+      const text = payload?.text;
+      if (
+        !eventUuid ||
+        !messageUuid ||
+        typeof text !== 'string' ||
+        text.trim().length === 0
+      )
+        return;
+      if (!socket.rooms.has(room(eventUuid))) return;
+      try {
+        const msg = await editChatMessage({
+          messageUuid,
+          senderUserUuid: user.uuid,
+          text: text.trim(),
+          languageCode: payload.language_code ?? 'es',
+        });
+        if (!msg) return; // no es el autor o ya estaba borrado
+        let translations: Record<string, string> = {
+          [msg.original_language_code]: msg.text,
+        };
+        try {
+          translations = await translateMessage(
+            msg.text,
+            msg.original_language_code,
+          );
+          await storeChatTranslations(
+            msg.uuid,
+            translations,
+            msg.original_language_code,
+          );
+        } catch (err) {
+          console.error('[edit_message] translate error:', err);
+        }
+        io.to(room(eventUuid)).emit('chat_message_edited', {
+          ...msg,
+          event_uuid: eventUuid,
+          translations,
+          edited: true,
+        });
+      } catch (e) {
+        console.error('[edit_message] error:', e);
+      }
+    },
+  );
+
+  // Borrar un mensaje (el autor, o un guia/admin). Avisa a toda la sala con
+  // 'chat_message_deleted' para que todos lo marquen como eliminado.
+  socket.on(
+    'delete_message',
+    async (payload: { event_uuid?: string; message_uuid?: string }) => {
+      const eventUuid = payload?.event_uuid;
+      const messageUuid = payload?.message_uuid;
+      if (!eventUuid || !messageUuid) return;
+      if (!socket.rooms.has(room(eventUuid))) return;
+      const canModerate = isGuide || hasRole(user, 'administrator');
+      try {
+        const ok = await deleteChatMessage({
+          messageUuid,
+          userUuid: user.uuid,
+          canModerate,
+        });
+        if (!ok) return;
+        io.to(room(eventUuid)).emit('chat_message_deleted', {
+          event_uuid: eventUuid,
+          uuid: messageUuid,
+        });
+      } catch (e) {
+        console.error('[delete_message] error:', e);
       }
     },
   );

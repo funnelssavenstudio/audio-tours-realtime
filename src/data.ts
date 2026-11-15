@@ -87,6 +87,59 @@ export async function storeChatTranslations(
 }
 
 /**
+ * Edita un mensaje (solo el autor). Cambia texto/idioma, marca edited_at y
+ * limpia las traducciones viejas (se re-cachean con storeChatTranslations).
+ * Devuelve el mensaje actualizado o null si no se puede editar (no es el autor
+ * o ya estaba borrado).
+ */
+export async function editChatMessage(params: {
+  messageUuid: string;
+  senderUserUuid: string;
+  text: string;
+  languageCode: string;
+}): Promise<StoredChatMessage | null> {
+  const rows = await query<StoredChatMessage>(
+    `UPDATE ext.chat_message
+       SET original_text = $3, original_language_code = $4, edited_at = now()
+     WHERE uuid = $1 AND sender_user_uuid = $2 AND deleted_at IS NULL
+     RETURNING uuid, sender_user_uuid, sender_role,
+               original_text AS text, original_language_code, created_at`,
+    [params.messageUuid, params.senderUserUuid, params.text, params.languageCode],
+  );
+  if (rows.length === 0) return null;
+  await query(
+    `DELETE FROM ext.chat_message_translation WHERE message_uuid = $1`,
+    [params.messageUuid],
+  );
+  return rows[0];
+}
+
+/**
+ * Borra (soft-delete) un mensaje: lo puede borrar el autor o un guia/admin
+ * (canModerate). Limpia sus traducciones. Devuelve true si borro algo.
+ */
+export async function deleteChatMessage(params: {
+  messageUuid: string;
+  userUuid: string;
+  canModerate: boolean;
+}): Promise<boolean> {
+  const rows = await query<{ uuid: string }>(
+    `UPDATE ext.chat_message
+       SET deleted_at = now()
+     WHERE uuid = $1 AND deleted_at IS NULL
+       AND ($3 = true OR sender_user_uuid = $2)
+     RETURNING uuid`,
+    [params.messageUuid, params.userUuid, params.canModerate],
+  );
+  if (rows.length === 0) return false;
+  await query(
+    `DELETE FROM ext.chat_message_translation WHERE message_uuid = $1`,
+    [params.messageUuid],
+  );
+  return true;
+}
+
+/**
  * Verifica que el usuario pertenezca al evento antes de dejarlo entrar a la
  * sala en vivo. Un guia pertenece si esta en public.event_tour_guides; un
  * turista si tiene un ticket (public.tickets) o un checkin (public.event_checkins)
