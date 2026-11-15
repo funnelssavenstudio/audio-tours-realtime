@@ -5,9 +5,12 @@
 const KEY = process.env.GOOGLE_TRANSLATE_API_KEY || '';
 
 // Idiomas destino a los que se traduce cada mensaje. Configurable por env.
-// Por defecto, los idiomas confirmados por el cliente (menos el original).
+// Por defecto, los 13 idiomas confirmados por el cliente, INCLUIDO el español
+// (es) y el español latino (es-419): hacen falta como destino para que, cuando
+// un turista escribe en otro idioma, al guia (o a quien tenga la app en espanol)
+// le llegue traducido. El idioma de origen se descarta solo mas abajo.
 const TARGETS = (process.env.TRANSLATE_LANGS ||
-  'en,fr,it,pt,de,ru,ar,hi,cs,he,zh')
+  'en,es,es-419,pt,it,fr,cs,zh,hi,de,ru,ar,he')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
