@@ -14,6 +14,28 @@ import {
   upsertTouristLocation,
 } from './data.js';
 import { translateMessage } from './translate.js';
+import { getEventMemberUuids, sendPushToUsers } from './push.js';
+
+/** Push del chat a los miembros del evento, menos el emisor (best-effort). */
+async function notifyChatMessage(
+  eventUuid: string,
+  senderUuid: string,
+  text: string,
+): Promise<void> {
+  try {
+    const members = await getEventMemberUuids(eventUuid);
+    const targets = members.filter((u) => u !== senderUuid);
+    if (targets.length === 0) return;
+    const body = text.length > 140 ? text.slice(0, 137) + '...' : text;
+    await sendPushToUsers(targets, {
+      title: 'Nuevo mensaje en el chat',
+      body,
+      data: { type: 'chat', event_uuid: eventUuid },
+    });
+  } catch (e) {
+    console.error('[notifyChatMessage] error:', e);
+  }
+}
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -134,6 +156,8 @@ io.on('connection', (socket) => {
           event_uuid: eventUuid,
           translations,
         });
+        // Notificacion push a los que no esten mirando el chat (app cerrada).
+        void notifyChatMessage(eventUuid, user.uuid, msg.text);
       } catch (e) {
         console.error('[chat_message] error:', e);
         socket.emit('chat_error', { reason: 'server_error' });
