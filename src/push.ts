@@ -6,6 +6,7 @@ import http2 from 'node:http2';
 import { createPrivateKey, sign as cryptoSign } from 'node:crypto';
 
 import { query } from './db.js';
+import { fcmEnabled, sendFcmToToken } from './fcm.js';
 
 const KEY_ID = process.env.APNS_KEY_ID || '';
 const TEAM_ID = process.env.APNS_TEAM_ID || '';
@@ -99,11 +100,11 @@ export async function sendPushToUser(
   userUuid: string,
   payload: PushPayload,
 ): Promise<void> {
-  if (!pushEnabled()) return;
-  let tokens: { token: string }[];
+  if (!pushEnabled() && !fcmEnabled()) return;
+  let tokens: { token: string; platform: string }[];
   try {
-    tokens = await query<{ token: string }>(
-      `SELECT token FROM ext.device_token WHERE user_uuid = $1 AND platform = 'ios'`,
+    tokens = await query<{ token: string; platform: string }>(
+      `SELECT token, platform FROM ext.device_token WHERE user_uuid = $1`,
       [userUuid],
     );
   } catch (e) {
@@ -112,24 +113,48 @@ export async function sendPushToUser(
   }
   if (tokens.length === 0) return;
 
-  const jwt = providerToken();
-  const client = http2.connect(HOST);
-  client.on('error', (e) => console.error('[push] http2 error:', e.message));
-  try {
+  const iosTokens = tokens.filter((t) => t.platform === 'ios').map((t) => t.token);
+  const androidTokens = tokens
+    .filter((t) => t.platform === 'android')
+    .map((t) => t.token);
+
+  // iOS -> APNs (si esta configurado).
+  if (pushEnabled() && iosTokens.length > 0) {
+    const jwt = providerToken();
+    const client = http2.connect(HOST);
+    client.on('error', (e) => console.error('[push] http2 error:', e.message));
+    try {
+      const results = await Promise.all(
+        iosTokens.map((t) => sendToToken(client, jwt, t, payload)),
+      );
+      for (const r of results) {
+        if (r.status === 410 || r.reason === 'BadDeviceToken' || r.reason === 'Unregistered') {
+          await query(`DELETE FROM ext.device_token WHERE token = $1`, [r.token]).catch(
+            () => {},
+          );
+        } else if (r.status !== 200) {
+          console.error(`[push] token ${r.token.slice(0, 8)}... status=${r.status} reason=${r.reason}`);
+        }
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  // Android -> FCM v1 (si esta configurado).
+  if (fcmEnabled() && androidTokens.length > 0) {
     const results = await Promise.all(
-      tokens.map((t) => sendToToken(client, jwt, t.token, payload)),
+      androidTokens.map((t) => sendFcmToToken(t, payload)),
     );
     for (const r of results) {
-      if (r.status === 410 || r.reason === 'BadDeviceToken' || r.reason === 'Unregistered') {
+      if (r.gone) {
         await query(`DELETE FROM ext.device_token WHERE token = $1`, [r.token]).catch(
           () => {},
         );
       } else if (r.status !== 200) {
-        console.error(`[push] token ${r.token.slice(0, 8)}... status=${r.status} reason=${r.reason}`);
+        console.error(`[fcm] token ${r.token.slice(0, 8)}... status=${r.status} reason=${r.reason}`);
       }
     }
-  } finally {
-    client.close();
   }
 }
 
@@ -137,7 +162,7 @@ export async function sendPushToUsers(
   userUuids: string[],
   payload: PushPayload,
 ): Promise<void> {
-  if (!pushEnabled() || userUuids.length === 0) return;
+  if ((!pushEnabled() && !fcmEnabled()) || userUuids.length === 0) return;
   await Promise.all(userUuids.map((u) => sendPushToUser(u, payload)));
 }
 
