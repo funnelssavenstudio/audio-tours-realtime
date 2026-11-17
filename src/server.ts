@@ -15,6 +15,7 @@ import {
 } from './data.js';
 import { translateMessage } from './translate.js';
 import { getEventMemberUuids, sendPushToUsers } from './push.js';
+import { monitorMessage } from './alerts.js';
 
 /** Push del chat a los miembros del evento, menos el emisor (best-effort). */
 async function notifyChatMessage(
@@ -158,6 +159,24 @@ io.on('connection', (socket) => {
         });
         // Notificacion push a los que no esten mirando el chat (app cerrada).
         void notifyChatMessage(eventUuid, user.uuid, msg.text);
+        // Alertas con IA (SEM08): solo mensajes de TURISTAS. Clasifica y, si es
+        // queja/perdido, guarda la alerta + push al guia + aviso en vivo al panel.
+        if (!isGuide) {
+          void monitorMessage({
+            eventUuid,
+            messageUuid: msg.uuid,
+            senderUserUuid: user.uuid,
+            text: msg.text,
+          }).then((alert) => {
+            if (alert) {
+              io.to(guidesRoom(eventUuid)).emit('ai_alert', {
+                event_uuid: eventUuid,
+                ...alert,
+                created_at: new Date().toISOString(),
+              });
+            }
+          });
+        }
       } catch (e) {
         console.error('[chat_message] error:', e);
         socket.emit('chat_error', { reason: 'server_error' });
