@@ -14,7 +14,7 @@ import {
   upsertTouristLocation,
 } from './data.js';
 import { translateMessage } from './translate.js';
-import { getEventMemberUuids, sendPushToUsers } from './push.js';
+import { getEventGuideUuids, getEventMemberUuids, sendPushToUsers } from './push.js';
 import { monitorMessage } from './alerts.js';
 
 /** Push del chat a los miembros del evento, menos el emisor (best-effort). */
@@ -28,11 +28,27 @@ async function notifyChatMessage(
     const targets = members.filter((u) => u !== senderUuid);
     if (targets.length === 0) return;
     const body = text.length > 140 ? text.slice(0, 137) + '...' : text;
-    await sendPushToUsers(targets, {
-      title: 'Nuevo mensaje en el chat',
-      body,
-      data: { type: 'chat', event_uuid: eventUuid },
-    });
+    // Separamos guías de turistas para que, al TOCAR la notif, el chat abra en
+    // el modo correcto (el guía con sus controles). is_guide va como string
+    // porque los datos de la push deben ser strings.
+    const guides = new Set(await getEventGuideUuids(eventUuid));
+    const guideTargets = targets.filter((u) => guides.has(u));
+    const touristTargets = targets.filter((u) => !guides.has(u));
+    const title = 'Nuevo mensaje en el chat';
+    if (guideTargets.length > 0) {
+      await sendPushToUsers(guideTargets, {
+        title,
+        body,
+        data: { type: 'chat', event_uuid: eventUuid, is_guide: '1' },
+      });
+    }
+    if (touristTargets.length > 0) {
+      await sendPushToUsers(touristTargets, {
+        title,
+        body,
+        data: { type: 'chat', event_uuid: eventUuid },
+      });
+    }
   } catch (e) {
     console.error('[notifyChatMessage] error:', e);
   }

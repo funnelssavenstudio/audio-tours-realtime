@@ -170,6 +170,15 @@ export async function sendPushToUsers(
  * UUIDs de los miembros del evento (guias + turistas con ticket o checkin),
  * para mandar la push del chat a todos menos el emisor.
  */
+/** UUIDs de los GUIAS del evento (para marcar la push como modo guía). */
+export async function getEventGuideUuids(eventUuid: string): Promise<string[]> {
+  const rows = await query<{ uuid: string }>(
+    `SELECT tour_guide_uuid AS uuid FROM public.event_tour_guides WHERE event_uuid = $1`,
+    [eventUuid],
+  );
+  return rows.map((r) => r.uuid).filter(Boolean);
+}
+
 export async function getEventMemberUuids(eventUuid: string): Promise<string[]> {
   const rows = await query<{ uuid: string }>(
     `SELECT tour_guide_uuid AS uuid FROM public.event_tour_guides WHERE event_uuid = $1
